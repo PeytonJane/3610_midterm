@@ -42,6 +42,22 @@ IR_G3toG3=5.4; %0.18*30
 
 VDR=0.1; %vaccine effect on death rate
 VIR=0.3; %vaccine effect on infection rate
+% assume people always either die or recover after 30 days, so there is no need to recover group
+
+%% time to stimulate
+
+%give vaccine proportion to each group
+temp=P_G1+P_G2+P_G3;
+
+V_P_G1=V_P_G1+V*P_G1/temp;
+V_P_G2=V_P_G2+V*P_G2/temp;
+V_P_G3=V_P_G3+V*P_G3/temp;
+
+P_G1=P_G1-V*P_G1/temp;
+P_G2=P_G2-V*P_G2/temp;
+P_G3=P_G3-V*P_G3/temp;
+
+%get infected
 
 
 
