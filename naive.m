@@ -4,7 +4,7 @@ V=3500;
 
 iniP_G1=P_tot*0.137; %<18
 iniP_G2=P_tot*0.164; %>65
-iniP_G3=P_tot-P_G1-P_G2; %18-65
+iniP_G3=P_tot-iniP_G1-iniP_G2; %18-65
 % unvaccinated uninfected population
 P_G1=iniP_G1;
 P_G2=iniP_G2;
