@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Support Chat</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="hero">
+        <h1>Support Chat</h1>
+        <p class="disclaimer">
+          This tool is not a replacement for emergency services. If you are in immediate danger, please call emergency services
+          (for example, <strong>911</strong> in the United States) or reach out to a trusted person nearby. You can quickly exit this page by closing the
+          browser tab and clearing your history when it is safe.
+        </p>
+      </section>
+
+      <section class="chat-panel">
+        <div class="chat-window" id="chatWindow" aria-live="polite"></div>
+        <form id="chatForm" class="chat-form">
+          <label class="sr-only" for="messageInput">Share your message</label>
+          <textarea
+            id="messageInput"
+            name="message"
+            rows="3"
+            placeholder="You can share what you're experiencing here."
+            required
+          ></textarea>
+          <div class="form-actions">
+            <button type="submit">Send</button>
+            <button type="button" id="newConversation">Start New Conversation</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="resources" aria-labelledby="resourcesTitle">
+        <h2 id="resourcesTitle">Helpful Resources</h2>
+        <ul id="resourceList"></ul>
+      </section>
+
+      <section class="analysis" aria-labelledby="analysisTitle">
+        <h2 id="analysisTitle">Conversation Insights</h2>
+        <div id="analysisPanel" class="analysis-panel">
+          <p class="muted">Send a message to view risk indicators.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
