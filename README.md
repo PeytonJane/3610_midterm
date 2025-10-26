@@ -17,8 +17,7 @@ This project provides a minimal full-stack application that offers a supportive 
 .
 ├── backend
 │   ├── app.py             # Flask application and REST API endpoints
-│   ├── database.py        # SQLAlchemy engine, session, and base class
-│   ├── models.py          # Conversation and Message ORM models
+│   ├── database.py        # Lightweight SQLite helpers and transactions
 │   ├── support.py         # Risk assessment logic and resource catalog
 │   └── __init__.py
 ├── frontend
@@ -33,14 +32,18 @@ This project provides a minimal full-stack application that offers a supportive 
 
 ### 1. Set up the backend
 
+Ensure you are using Python 3.8 or later (including Python 3.13). On macOS and Linux you can verify with `python3 --version`.
+
 ```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m backend.app
 ```
 
-The Flask API runs on `http://localhost:5000`. A SQLite database file named `chatbot.db` is created in the project root.
+The Flask API runs on `http://localhost:5000`. A SQLite database file named `chatbot.db` is created in the project root using
+Python's built-in `sqlite3` driver, so no external database drivers or compiled extensions are required.
 
 ### 2. Launch the frontend
 

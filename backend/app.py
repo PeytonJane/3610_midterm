@@ -5,16 +5,21 @@ from typing import Dict, List
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from sqlalchemy import select
 
-from .database import Base, engine, session_scope
-from .models import Conversation, Message
+from .database import fetchall, fetchone, init_db, session_scope
 from .support import RESOURCES, assess_risk, build_supportive_message, merge_risk_levels
 
 app = Flask(__name__)
 CORS(app)
 
-Base.metadata.create_all(bind=engine)
+init_db()
+
+
+def _isoformat(timestamp: str) -> str:
+    try:
+        return datetime.fromisoformat(timestamp).isoformat()
+    except ValueError:
+        return timestamp
 
 
 @app.get("/api/resources")
@@ -31,35 +36,48 @@ def chat():
     if not user_message:
         return jsonify({"error": "A message is required."}), 400
 
-    with session_scope() as session:
-        conversation: Conversation
+    with session_scope() as connection:
+        current = None
         if conversation_id is not None:
-            conversation = session.get(Conversation, conversation_id)  # type: ignore[arg-type]
-            if conversation is None:
-                conversation = Conversation(risk_level="unknown")
-                session.add(conversation)
-                session.flush()
-        else:
-            conversation = Conversation(risk_level="unknown")
-            session.add(conversation)
-            session.flush()
+            current = connection.execute(
+                "SELECT id, risk_level FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
 
-        user_entry = Message(conversation_id=conversation.id, sender="user", text=user_message)
-        session.add(user_entry)
+        if current is None:
+            cursor = connection.execute(
+                "INSERT INTO conversations (risk_level) VALUES (?)",
+                ("unknown",),
+            )
+            conversation_id = cursor.lastrowid
+            current_risk = "unknown"
+        else:
+            conversation_id = current["id"]
+            current_risk = current["risk_level"]
+
+        connection.execute(
+            "INSERT INTO messages (conversation_id, sender, text) VALUES (?, ?, ?)",
+            (conversation_id, "user", user_message),
+        )
 
         risk_result = assess_risk(user_message)
-        conversation.risk_level = merge_risk_levels(conversation.risk_level, risk_result.level)
+        merged_risk = merge_risk_levels(current_risk, risk_result.level)
+
+        connection.execute(
+            "UPDATE conversations SET risk_level = ? WHERE id = ?",
+            (merged_risk, conversation_id),
+        )
 
         bot_text = build_supportive_message(risk_result)
-        bot_entry = Message(conversation_id=conversation.id, sender="bot", text=bot_text)
-        session.add(bot_entry)
-
-        session.flush()
+        connection.execute(
+            "INSERT INTO messages (conversation_id, sender, text) VALUES (?, ?, ?)",
+            (conversation_id, "bot", bot_text),
+        )
 
         response = {
-            "conversation_id": conversation.id,
+            "conversation_id": conversation_id,
             "response": bot_text,
-            "risk_level": conversation.risk_level,
+            "risk_level": merged_risk,
             "triggers": risk_result.triggers,
             "recommended_resources": risk_result.recommended_resources,
         }
@@ -69,79 +87,113 @@ def chat():
 
 @app.get("/api/conversations")
 def list_conversations():
-    with session_scope() as session:
-        conversations = session.execute(select(Conversation)).scalars().all()
-        result = [
-            {
-                "id": conv.id,
-                "created_at": conv.created_at.isoformat(),
-                "risk_level": conv.risk_level,
-                "message_count": len(conv.messages),
-            }
-            for conv in conversations
-        ]
+    rows = fetchall(
+        """
+        SELECT c.id, c.created_at, c.risk_level, COUNT(m.id) AS message_count
+        FROM conversations AS c
+        LEFT JOIN messages AS m ON m.conversation_id = c.id
+        GROUP BY c.id
+        ORDER BY c.created_at DESC
+        """
+    )
+
+    result = [
+        {
+            "id": row["id"],
+            "created_at": _isoformat(row["created_at"]),
+            "risk_level": row["risk_level"],
+            "message_count": row["message_count"],
+        }
+        for row in rows
+    ]
+
     return jsonify({"conversations": result})
 
 
 @app.get("/api/conversations/<int:conversation_id>")
 def get_conversation(conversation_id: int):
-    with session_scope() as session:
-        conversation = session.get(Conversation, conversation_id)
-        if conversation is None:
-            return jsonify({"error": "Conversation not found."}), 404
+    conversation = fetchone(
+        "SELECT id, created_at, risk_level FROM conversations WHERE id = ?",
+        (conversation_id,),
+    )
+    if conversation is None:
+        return jsonify({"error": "Conversation not found."}), 404
 
-        messages = [
+    messages = fetchall(
+        """
+        SELECT id, sender, text, created_at
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (conversation_id,),
+    )
+
+    data = {
+        "id": conversation["id"],
+        "created_at": _isoformat(conversation["created_at"]),
+        "risk_level": conversation["risk_level"],
+        "messages": [
             {
-                "id": message.id,
-                "sender": message.sender,
-                "text": message.text,
-                "created_at": message.created_at.isoformat(),
+                "id": message["id"],
+                "sender": message["sender"],
+                "text": message["text"],
+                "created_at": _isoformat(message["created_at"]),
             }
-            for message in conversation.messages
-        ]
-
-        data = {
-            "id": conversation.id,
-            "created_at": conversation.created_at.isoformat(),
-            "risk_level": conversation.risk_level,
-            "messages": messages,
-        }
+            for message in messages
+        ],
+    }
 
     return jsonify(data)
 
 
 @app.get("/api/conversations/<int:conversation_id>/analysis")
 def analyze_conversation(conversation_id: int):
-    with session_scope() as session:
-        conversation = session.get(Conversation, conversation_id)
-        if conversation is None:
-            return jsonify({"error": "Conversation not found."}), 404
+    conversation = fetchone(
+        "SELECT id, created_at, risk_level FROM conversations WHERE id = ?",
+        (conversation_id,),
+    )
+    if conversation is None:
+        return jsonify({"error": "Conversation not found."}), 404
 
-        keyword_flags: List[Dict[str, str]] = []
-        for message in conversation.messages:
-            if message.sender != "user":
-                continue
-            risk = assess_risk(message.text)
-            if risk.triggers:
-                keyword_flags.append(
-                    {
-                        "message_id": message.id,
-                        "excerpt": message.text[:120],
-                        "triggers": risk.triggers,
-                        "assessed_level": risk.level,
-                    }
-                )
+    messages = fetchall(
+        """
+        SELECT id, sender, text, created_at
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (conversation_id,),
+    )
 
-        data = {
-            "conversation_id": conversation.id,
-            "created_at": conversation.created_at.isoformat(),
-            "risk_level": conversation.risk_level,
-            "message_count": len(conversation.messages),
-            "user_message_count": sum(1 for m in conversation.messages if m.sender == "user"),
-            "bot_message_count": sum(1 for m in conversation.messages if m.sender == "bot"),
-            "keyword_flags": keyword_flags,
-            "last_message_at": max((m.created_at for m in conversation.messages), default=datetime.utcnow()).isoformat(),
-        }
+    keyword_flags: List[Dict[str, str]] = []
+    last_message_at = None
+    for message in messages:
+        timestamp = _isoformat(message["created_at"])
+        last_message_at = timestamp
+        if message["sender"] != "user":
+            continue
+        risk = assess_risk(message["text"])
+        if risk.triggers:
+            keyword_flags.append(
+                {
+                    "message_id": message["id"],
+                    "excerpt": message["text"][:120],
+                    "triggers": risk.triggers,
+                    "assessed_level": risk.level,
+                }
+            )
+
+    data = {
+        "conversation_id": conversation["id"],
+        "created_at": _isoformat(conversation["created_at"]),
+        "risk_level": conversation["risk_level"],
+        "message_count": len(messages),
+        "user_message_count": sum(1 for m in messages if m["sender"] == "user"),
+        "bot_message_count": sum(1 for m in messages if m["sender"] == "bot"),
+        "keyword_flags": keyword_flags,
+        "last_message_at": last_message_at or datetime.utcnow().isoformat(),
+    }
 
     return jsonify(data)
 
